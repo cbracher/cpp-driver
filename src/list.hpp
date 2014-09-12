@@ -20,6 +20,7 @@
 #include "macros.hpp"
 
 #include <stddef.h>
+#include "scoped_mutex.hpp"
 
 namespace cass {
 
@@ -44,6 +45,7 @@ public:
     bool has_next() { return curr_ != end_; }
 
     S* next() {
+      ScopedMutex lock(&mutex_);
       Node* temp = curr_;
       curr_ = curr_->next_;
       return static_cast<T*>(temp);
@@ -51,12 +53,14 @@ public:
 
   private:
     friend class List;
-    Iterator(Node* begin, Node* end)
+    Iterator(Node* begin, Node* end, uv_mutex_t& mutex)
         : curr_(begin)
-        , end_(end) {}
+        , end_(end)
+        , mutex_(mutex) {}
 
     Node* curr_;
     Node* end_;
+    uv_mutex_t& mutex_;
   };
 
 public:
@@ -64,6 +68,7 @@ public:
       : size_(0) {
     data_.next_ = &data_;
     data_.prev_ = &data_;
+    uv_mutex_init(&mutex_);
   }
 
   void add_to_front(T* node);
@@ -71,18 +76,20 @@ public:
   void remove(T* node);
 
   T* front() {
+    ScopedMutex lock(&mutex_);
     if (is_empty()) return NULL;
     return static_cast<T*>(data_.next_);
   }
 
   T* back() {
+    ScopedMutex lock(&mutex_);
     if (is_empty()) return NULL;
     return static_cast<T*>(data_.prev_);
   }
 
   size_t size() const { return size_; }
   bool is_empty() { return data_.next_ == &data_; }
-  Iterator<T> iterator() { return Iterator<T>(data_.next_, &data_); }
+  Iterator<T> iterator() { return Iterator<T>(data_.next_, &data_, mutex_); }
 
 private:
   void insert_before(Node* pos, Node* node);
@@ -91,12 +98,14 @@ private:
   Node data_;
   size_t size_;
 
+  uv_mutex_t mutex_;
 private:
   DISALLOW_COPY_AND_ASSIGN(List);
 };
 
 template <class T>
 void List<T>::add_to_front(T* node) {
+  ScopedMutex lock(&mutex_);
   insert_after(&data_, node);
 }
 
@@ -107,6 +116,7 @@ void List<T>::add_to_back(T* node) {
 
 template <class T>
 void List<T>::remove(T* node) {
+  ScopedMutex lock(&mutex_);
   size_--;
   node->prev_->next_ = node->next_;
   node->next_->prev_ = node->prev_;
@@ -116,6 +126,7 @@ void List<T>::remove(T* node) {
 
 template <class T>
 void List<T>::insert_after(Node* pos, Node* node) {
+  ScopedMutex lock(&mutex_);
   size_++;
   pos->next_->prev_ = node;
   node->prev_ = pos;
@@ -125,6 +136,7 @@ void List<T>::insert_after(Node* pos, Node* node) {
 
 template <class T>
 void List<T>::insert_before(Node* pos, Node* node) {
+  ScopedMutex lock(&mutex_);
   size_++;
   pos->prev_->next_ = node;
   node->next_ = pos;
